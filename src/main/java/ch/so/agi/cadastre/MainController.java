@@ -4,10 +4,16 @@ import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
 
+import javax.annotation.PostConstruct;
+import javax.enterprise.context.ApplicationScoped;
+import javax.inject.Inject;
+import javax.ws.rs.Consumes;
 import javax.ws.rs.GET;
 import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
 import javax.ws.rs.Produces;
+import javax.ws.rs.QueryParam;
+import javax.ws.rs.container.ContainerRequestContext;
 import javax.ws.rs.core.Context;
 import javax.ws.rs.core.HttpHeaders;
 import javax.ws.rs.core.MediaType;
@@ -21,6 +27,16 @@ import javax.ws.rs.core.Context;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 import org.jboss.resteasy.specimpl.RequestImpl;
+import org.jdbi.v3.core.Handle;
+import org.jdbi.v3.core.Jdbi;
+import org.locationtech.jts.geom.Coordinate;
+import org.locationtech.jts.geom.GeometryFactory;
+import org.locationtech.jts.geom.PrecisionModel;
+import org.locationtech.jts.io.ByteOrderValues;
+import org.locationtech.jts.io.WKBWriter;
+
+import ch.so.geo.schema.agi.cadastre._0_9.extract.GetEGRIDResponse;
+import io.agroal.api.AgroalDataSource;
 
 @Path("/")
 public class MainController {
@@ -65,6 +81,17 @@ public class MainController {
     
     @ConfigProperty(name = "cadastre.tmpdir", defaultValue="/tmp") 
     String cadastreTmpdir;
+    
+    @Inject
+    WsConfig wsConfig;
+    
+    private Jdbi jdbi;
+    
+    @PostConstruct
+    public void init() {
+        this.jdbi = wsConfig.jdbi();
+    }
+
 
     @GET
     @Path("ping")    
@@ -84,65 +111,113 @@ public class MainController {
     }
     
     @GET
-    @Path("fubar2")
-    @Produces(MediaType.TEXT_PLAIN)
-    public String fubar3(@Context UriInfo uriInfo) {
+    @Path(value = "getegrid/{format}")
+    @Produces({MediaType.APPLICATION_XML})
+    public Response getEgridByXY(@PathParam("format") String format, @QueryParam("XY") String xy, @QueryParam("GNSS") String gnss) {
+        if (!format.equals(PARAM_FORMAT_XML)) {
+            throw new IllegalArgumentException("unsupported format <" + format + ">");
+        }
         
+        if (xy == null && gnss == null) {
+            throw new IllegalArgumentException("parameter XY or GNSS required");
+        } else if (xy != null && gnss != null) {
+            throw new IllegalArgumentException("only one of parameters XY or GNSS is allowed");
+        }
+        Coordinate coord = null;
+        int srid = 2056;
+        double scale = 1000.0;
+        if (xy != null) {
+            coord = parseCoord(xy);
+            srid = 2056;
+            if (coord.x < 2000000.0) {
+                srid = 21781;
+            }
+        } else {
+            coord = parseCoord(gnss);
+            srid = 4326;
+            scale = 100000.0;
+        }
+        
+        WKBWriter geomEncoder = new WKBWriter(2, ByteOrderValues.BIG_ENDIAN, true);
+        PrecisionModel precisionModel = new PrecisionModel(scale);
+        GeometryFactory geomFact = new GeometryFactory(precisionModel, srid);
+        byte geom[] = geomEncoder.write(geomFact.createPoint(coord));
+
+        GetEGRIDResponse ret = new GetEGRIDResponse();
+        
+        
+        LOGGER.info("fubar");
+        
+        return Response.noContent().build();
+    }
+
+    
+    @GET
+    @Path(value = "extract/{format}/geometry/{egrid}") 
+    @Produces({MediaType.APPLICATION_XML, "application/pdf"})
+    public void getExtractWithGeometryByEgrid(@Context UriInfo uriInfo, @PathParam("format") String format, @PathParam("egrid") String egrid) {
         LOGGER.info(uriInfo.getBaseUri());
         LOGGER.info(uriInfo.getPath());
         LOGGER.info(uriInfo.getPathParameters().toString());
         LOGGER.info(uriInfo.getRequestUri().toString());
         LOGGER.info(uriInfo.getPathSegments().toString());
+        LOGGER.info("***"+uriInfo.getRequestUri().toString().replace(uriInfo.getPath(), ""));
+        LOGGER.info(getLogoRef(uriInfo.getRequestUri().toString().replace(uriInfo.getPath(), ""), "myLogo"));
+        LOGGER.info(this.getImageOrNull("ch.so"));
         
-        LOGGER.info("*"+this.getLogoRef(uriInfo.getBaseUriBuilder(), "logoId"));
-        
-        return "adf";
     }
     
+    @GET
+    @Path("logo/{id}")
+    public Response getLogo(@PathParam("id") String id) {
+        LOGGER.info("id " + id);
+        byte image[] = getImageOrNull(id);
+        if (image == null) {
+            return Response.noContent().build();
+        }
+        return Response.ok(image).header("content-disposition", "attachment; filename=" + id + ".png")
+                .header("content-length", image.length)
+                .header("content-type", "image/png")
+                .build();
+    }    
     
-    
-//    @GET
-//    @Path("logo/{id}")
-//    public Response getLogo(@PathParam("id") String id) {
-//        LOGGER.info("id " + id);
-//        byte image[] = getImageOrNull(id);
-//        if (image == null) {
-//            return Response.noContent().build();
-//        }
-//        return Response.ok(image).header("content-disposition", "attachment; filename=" + id + ".png")
-//                .header("content-length", image.length)
-//                .header("content-type", "image/png")
-//                .build();
-//    }
+    // TODO 
+    // Es gibt keinen Applikationscontext wie bei Spring Boot (resp.
+    // Tomcat. Gibt es bessere Lösungen? Nicht getested, ob 
+    // bei x-forwarded header etc. dies so auch noch funktioniert.
+    private String getLogoRef(String applicationUrl, String id) {
+        return applicationUrl + "/" + LOGO_ENDPOINT + "/" + id;
+    }
     
     private String getSchema() {
         return dbschema!=null?dbschema:"xcadastre";
     }    
     
-    private String getLogoRef(UriBuilder builder, String id) {
-//        return ServletUriComponentsBuilder.fromCurrentContextPath().pathSegment(LOGO_ENDPOINT).pathSegment(id).build().toUriString();
-        
-//        uriInfo.getBaseUriBuilder().fromPath(LOGO_ENDPOINT).fromPath(id).build(values).
-//        UriBuilder builder = UriBuilder.fromPath(LOGO_ENDPOINT+"/"+id);
-//        builder.p
-        return builder.fromPath(LOGO_ENDPOINT).fromPath(id).build().getHost();
+    private byte[] getImage(String code) {
+        byte[] ret = getImageOrNull(code);
+        if (ret != null) {
+            return ret;
+        }
+        return minimalImage;
     }
     
-//    private byte[] getImage(String code) {
-//        byte[] ret = getImageOrNull(code);
-//        if (ret != null) {
-//            return ret;
-//        }
-//        return minimalImage;
-//    }
-//    
-//    private byte[] getImageOrNull(String code) {
-//        java.util.List<byte[]> baseData = jdbcTemplate.queryForList(
-//                "SELECT logo FROM " + getSchema() + "." + TABLE_OERB_XTNX_V1_0ANNEX_LOGO + " WHERE acode=?",
-//                byte[].class, code);
-//        if (baseData != null && baseData.size() == 1) {
-//            return baseData.get(0);
-//        }
-//        return null;
-//    }
+    private byte[] getImageOrNull(String code) {
+        try (Handle handle = jdbi.open()) {
+            byte[] baseData = handle.select("SELECT logo FROM " + getSchema() + "." + TABLE_OERB_XTNX_V1_0ANNEX_LOGO + " WHERE acode=?", code)
+                    .mapTo(byte[].class)
+                    .one();
+            if (baseData != null) {
+                return baseData;
+            }
+        }
+        return null;
+    }
+    
+    private Coordinate parseCoord(String xy) {
+        int sepPos = xy.indexOf(',');
+        double x = Double.parseDouble(xy.substring(0, sepPos));
+        double y = Double.parseDouble(xy.substring(sepPos + 1));
+        Coordinate coord = new Coordinate(x, y);
+        return coord;
+    }    
 }
