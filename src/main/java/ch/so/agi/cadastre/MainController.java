@@ -1,5 +1,8 @@
 package ch.so.agi.cadastre;
 
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
@@ -30,6 +33,8 @@ import javax.ws.rs.core.Request;
 import javax.ws.rs.core.Application;
 import javax.ws.rs.core.UriInfo;
 import javax.xml.bind.JAXBElement;
+import javax.xml.bind.JAXBException;
+import javax.xml.bind.Marshaller;
 import javax.xml.datatype.DatatypeConfigurationException;
 import javax.xml.datatype.DatatypeFactory;
 import javax.xml.datatype.XMLGregorianCalendar;
@@ -50,9 +55,18 @@ import org.locationtech.jts.io.ByteOrderValues;
 import org.locationtech.jts.io.WKBReader;
 import org.locationtech.jts.io.WKBWriter;
 
+import ch.so.geo.schema.agi.cadastre._0_9.extract.AddressType;
+import ch.so.geo.schema.agi.cadastre._0_9.extract.BuildingType;
+import ch.so.geo.schema.agi.cadastre._0_9.extract.BuildingEntryType;
 import ch.so.geo.schema.agi.cadastre._0_9.extract.Extract;
 import ch.so.geo.schema.agi.cadastre._0_9.extract.GetEGRIDResponse;
 import ch.so.geo.schema.agi.cadastre._0_9.extract.GetExtractByIdResponse;
+import ch.so.geo.schema.agi.cadastre._0_9.extract.LCType;
+import ch.so.geo.schema.agi.cadastre._0_9.extract.LandCoverShareType;
+import ch.so.geo.schema.agi.cadastre._0_9.extract.LocalNameType;
+import ch.so.geo.schema.agi.cadastre._0_9.extract.OrganisationType;
+import ch.so.geo.schema.agi.cadastre._0_9.extract.PersonAddressType;
+import ch.so.geo.schema.agi.cadastre._0_9.extract.RealEstateDPR;
 import ch.so.geo.schema.agi.cadastre._0_9.extract.RealEstateType;
 import io.agroal.api.AgroalDataSource;
 
@@ -105,12 +119,14 @@ public class MainController {
     
     private Jdbi jdbi;
     
+    @Inject
+    Marshaller marshaller;
+    
     @PostConstruct
     public void init() {
         this.jdbi = wsConfig.jdbi();
     }
-
-
+    
     @GET
     @Path("ping")    
     @Produces(MediaType.TEXT_PLAIN)
@@ -232,44 +248,342 @@ public class MainController {
 
         extract.setCreationDate(today);
         
-//        if (withImages) {
-//            try {
-//                InputStream inputStream = new ClassPathResource("static/logo-grundstuecksinformation_no_alpha.png").getInputStream();
-//                byte[] bdata = FileCopyUtils.copyToByteArray(inputStream);
-//                extract.setLogoGrundstuecksinformation(bdata);
-//            } catch (IOException e) {
-//                throw new IllegalStateException(e);
-//            }
-//            extract.setCantonalLogo(getImage("ch." + parcel.getNbident().substring(0, 2).toLowerCase()));
-//            extract.setMunicipalityLogo(getImage("ch." + String.valueOf(parcel.getBfsnr())));
-//        } else {
-//            extract.setLogoGrundstuecksinformationRef(ServletUriComponentsBuilder.fromCurrentContextPath().pathSegment("logo-grundstuecksinformation_no_alpha.png").build().toUriString()); 
-//            extract.setCantonalLogoRef(getLogoRef("ch." + parcel.getNbident().substring(0, 2).toLowerCase()));
-//            extract.setMunicipalityLogoRef(getLogoRef("ch." + String.valueOf(parcel.getBfsnr())));
-//        }
+        if (withImages) {
+            try {            
+                ClassLoader classLoader = getClass().getClassLoader();
+                File file = new File(classLoader.getResource("/META-INF/resources/logo-grundstuecksinformation_no_alpha.png").getFile());
+                InputStream inputStream = new FileInputStream(file);
+                byte[] bdata = inputStream.readAllBytes();
+                extract.setLogoGrundstuecksinformation(bdata);
+            } catch (IOException e) {
+                throw new IllegalStateException(e);
+            }
+            extract.setCantonalLogo(getImage("ch." + parcel.getNbident().substring(0, 2).toLowerCase()));
+            extract.setMunicipalityLogo(getImage("ch." + String.valueOf(parcel.getBfsnr())));
+        } else {
+            String applicationContext = this.getApplicationContext(uriInfo);
+            extract.setLogoGrundstuecksinformationRef(applicationContext + "/" + "logo-grundstuecksinformation_no_alpha.png"); 
+            extract.setCantonalLogoRef(getLogoRef(applicationContext, "ch." + parcel.getNbident().substring(0, 2).toLowerCase()));
+            extract.setMunicipalityLogoRef(getLogoRef(applicationContext, "ch." + String.valueOf(parcel.getBfsnr())));
+        }
         
+        OrganisationType responsibleOffice = new OrganisationType();
+        responsibleOffice.setName("Amt für Geoinformation");
+        responsibleOffice.setEmail("agi@bd.so.ch");
+        responsibleOffice.setWeb("https://agi.so.ch");
+        responsibleOffice.setPhone("032 627 75 92");
+        AddressType responsibleOfficeAddress = new AddressType();
+        responsibleOfficeAddress.setStreet("Rötistrasse");
+        responsibleOfficeAddress.setNumber("4");
+        responsibleOfficeAddress.setPostalCode(Integer.valueOf("4500"));
+        responsibleOfficeAddress.setCity("Solothurn");
+        responsibleOffice.setAddress(responsibleOfficeAddress);
+        extract.setResponsibleOffice(responsibleOffice);
         
+        RealEstateDPR realEstate = new RealEstateDPR();
+        realEstate.setEGRID(egrid);
+        realEstate.setIdentND(parcel.getNbident());
+        realEstate.setNumber(parcel.getNummer());
+        realEstate.setSubunitOfLandRegister(parcel.getGbSubKreis());
+        realEstate.setMunicipality(parcel.getGemeinde());
+        realEstate.setLimit(parcel.getGeometrie().toString());
+        realEstate.setLandRegistryArea(new Double(parcel.getFlaechenmass()).intValue());
+        realEstate.setType(gsArtLookUp(parcel.getArt()).value());
+
+        setFlurnamen(realEstate, parcel.getGeometrie());
+        setBodenbedeckung(realEstate, parcel.getGeometrie());
+        setGebaeude(realEstate, parcel.getGeometrie());
+        setNfGeometerAddress(realEstate, parcel.getBfsnr());
+        setGrundbuchamtAddress(realEstate, parcel.getGbSubKreisNummer());
+        setVermessungsaufsichtAddress(realEstate);
         
-        
-        
+        extract.setRealEstate(realEstate);        
         GetExtractByIdResponse response = new GetExtractByIdResponse();
         response.setExtract(extract);
         
         if(format.equals(PARAM_FORMAT_PDF)) {
-//            return getExtractAsPdf(parcel, response);
+            return getExtractAsPdf(parcel, response);
         }
-        return Response.ok(response).build();
-        
-//        LOGGER.info(uriInfo.getBaseUri());
-//        LOGGER.info(uriInfo.getPath());
-//        LOGGER.info(uriInfo.getPathParameters().toString());
-//        LOGGER.info(uriInfo.getRequestUri().toString());
-//        LOGGER.info(uriInfo.getPathSegments().toString());
-//        LOGGER.info("***"+uriInfo.getRequestUri().toString().replace(uriInfo.getPath(), ""));
-//        LOGGER.info(getLogoRef(uriInfo.getRequestUri().toString().replace(uriInfo.getPath(), ""), "myLogo"));
-//        LOGGER.info(this.getImageOrNull("ch.so"));
+        return Response.ok(response).build();        
     }
     
+    private Response getExtractAsPdf(Grundstueck parcel, GetExtractByIdResponse response) {
+        File tmpFolder = new File(cadastreTmpdir,"cadastrews"+Thread.currentThread().getId());
+        if(!tmpFolder.exists()) {
+            tmpFolder.mkdirs();
+        }
+        LOGGER.info("tmpFolder {}" + tmpFolder.getAbsolutePath());
+
+        File tmpExtractFile = new java.io.File(tmpFolder,parcel.getEgrid()+".xml");
+        try {
+            marshaller.marshal(response, new javax.xml.transform.stream.StreamResult(tmpExtractFile));
+
+            LOGGER.info(tmpExtractFile.getAbsolutePath());
+            
+        } catch (JAXBException e) {
+            throw new IllegalStateException(e.getMessage());
+        }
+
+        
+        return null;
+    }
+    
+    private void setVermessungsaufsichtAddress(RealEstateDPR realEstate) {       
+        OrganisationType organisation = new OrganisationType();
+        organisation.setName("Amt für Geoinformation");
+        organisation.setEmail("agi@bd.so.ch");
+        organisation.setWeb("https://agi.so.ch");
+        organisation.setPhone("032 627 75 92");
+        AddressType address = new AddressType();
+        address.setStreet("Rötistrasse");
+        address.setNumber("4");
+        address.setPostalCode(Integer.valueOf("4500"));
+        address.setCity("Solothurn");
+        organisation.setAddress(address);
+        realEstate.setSupervisionOffice(organisation);
+    }
+    
+    private void setGrundbuchamtAddress(RealEstateDPR realEstate, int fosnr) {
+        String stmt = "SELECT amt, amtschreiberei, strasse, hausnummer, plz, ortschaft, telefon, email, web, bfsnr FROM "+getSchema()+"."+TABLE_SO_G_V_0180822GRUNDBUCHKREISE_GRUNDBUCHKREIS
+                + " WHERE grundbuchkreis_bfsnr = ?";
+        try (Handle handle = jdbi.open()) {
+            Map<String,Object> organisationMap = handle.select(stmt, fosnr)
+                    .mapToMap()
+                    .one();
+            OrganisationType organisation = new OrganisationType();
+            organisation.setName((String) organisationMap.get("amtschreiberei")); 
+            if (organisationMap.get("amt") != null) organisation.setLine1((String) organisationMap.get("amt"));
+            AddressType address = new AddressType();
+            address.setStreet((String) organisationMap.get("strasse"));
+            if(organisationMap.get("hausnummer") != null) address.setNumber((String) organisationMap.get("hausnummer"));
+            address.setPostalCode((Integer) organisationMap.get("plz"));
+            address.setCity((String) organisationMap.get("ortschaft"));
+            organisation.setAddress(address);
+            organisation.setPhone((String) organisationMap.get("telefon"));
+            organisation.setEmail((String) organisationMap.get("email"));
+            organisation.setWeb((String)organisationMap.get("web"));
+            realEstate.setLandRegisterOffice(organisation);            
+        }
+    }
+    
+    private void setNfGeometerAddress(RealEstateDPR realEstate, int fosnr) {
+        String stmt = "SELECT nfg_titel, nfg_name, nfg_vorname, firma, firma_zusatz, strasse, hausnummer, plz, ortschaft, telefon, web, email FROM "+getSchema()+"."+TABLE_SO_G_V_0180822NACHFUEHRUNGSKREISE_GEMEINDE
+                + " WHERE bfsnr = ?";
+        try (Handle handle = jdbi.open()) {
+            Map<String,Object> organisationMap = handle.select(stmt, fosnr)
+                .mapToMap()
+                .one();
+            OrganisationType organisation = new OrganisationType();
+            organisation.setName((String) organisationMap.get("firma")); 
+            if (organisationMap.get("firma_zusatz") != null) organisation.setLine1((String) organisationMap.get("firma_zusatz"));
+            PersonAddressType person = new PersonAddressType();
+            person.setLastName((String) organisationMap.get("nfg_name"));
+            person.setFirstName((String) organisationMap.get("nfg_vorname"));
+            organisation.setPerson(person);
+            AddressType address = new AddressType();
+            address.setStreet((String) organisationMap.get("strasse"));
+            address.setNumber((String) organisationMap.get("hausnummer"));
+            address.setPostalCode((Integer) organisationMap.get("plz"));
+            address.setCity((String) organisationMap.get("ortschaft"));
+            organisation.setAddress(address);
+            organisation.setPhone((String) organisationMap.get("telefon"));
+            organisation.setEmail((String) organisationMap.get("email"));
+            organisation.setWeb((String)organisationMap.get("web"));
+            realEstate.setSurveyorOffice(organisation);
+        }
+    }
+    
+    private void setGebaeude(RealEstateDPR realEstate, Geometry parcelGeom) {
+        WKBWriter geomEncoder = new WKBWriter(2, ByteOrderValues.BIG_ENDIAN);
+        byte parcelWkbGeometry[] = geomEncoder.write(parcelGeom);
+
+        PrecisionModel precisionModel = new PrecisionModel(1000.0);
+        GeometryFactory geomFactory = new GeometryFactory(precisionModel);
+        WKBReader decoder=new WKBReader(geomFactory);
+
+        String stmt = "SELECT DISTINCT ON (bb.t_id) bb.t_id, ST_AsBinary(bb.geometrie) as geometrie, gwr_egid, 'realisiert' AS status, bb.art \n" + 
+                "FROM \n" +
+                "     "+getSchema()+"."+TABLE_DM01VCH24LV95DBODENBEDECKUNG_BOFLAECHE+" AS bb \n" + 
+                "     LEFT JOIN "+getSchema()+"."+TABLE_DM01VCH24LV95DBODENBEDECKUNG_GEBAEUDENUMMER+" AS bbnr ON bbnr.gebaeudenummer_von = bb.t_id\n" + 
+                "WHERE art = 'Gebaeude' AND ST_DWithin(ST_GeomFromWKB(:geom,2056), bb.geometrie, 0.1) \n" +
+                "UNION ALL \n" +
+                "SELECT DISTINCT ON (bb.t_id) bb.t_id, ST_AsBinary(bb.geometrie) as geometrie, gwr_egid, 'projektiert' AS status, bb.art \n" + 
+                "FROM \n" +
+                "     "+getSchema()+"."+TABLE_DM01VCH24LV95DBODENBEDECKUNG_PROJBOFLAECHE+" AS bb \n" + 
+                "     LEFT JOIN "+getSchema()+"."+TABLE_DM01VCH24LV95DBODENBEDECKUNG_PROJGEBAEUDENUMMER+" AS bbnr ON bbnr.projgebaeudenummer_von = bb.t_id\n" + 
+                "WHERE art = 'Gebaeude' AND ST_DWithin(ST_GeomFromWKB(:geom,2056), bb.geometrie, 0.1) \n" + 
+                "UNION ALL \n" +
+                "SELECT DISTINCT ON (fl.t_id) fl.t_id, ST_AsBinary(fl.geometrie) AS geometrie, eonr.gwr_egid, 'realisiert' AS status, eo.art \n" + 
+                "FROM \n" + 
+                "    (SELECT * FROM "+getSchema()+"."+TABLE_DM01VCH24LV95DEINZELOBJEKTE_EINZELOBJEKT+" WHERE art = 'unterirdisches_Gebaeude') AS eo \n" + 
+                "    JOIN (SELECT * FROM "+getSchema()+"."+TABLE_DM01VCH24LV95DEINZELOBJEKTE_FLAECHENELEMENT+" WHERE ST_DWithin(ST_GeomFromWKB(:geom,2056), geometrie, 0.1)) AS fl \n" + 
+                "    ON fl.flaechenelement_von = eo.t_id \n" + 
+                "    LEFT JOIN "+getSchema()+"."+TABLE_DM01VCH24LV95DEINZELOBJEKTE_OBJEKTNUMMER+" AS eonr\n" + 
+                "    ON eonr.objektnummer_von = eo.t_id";
+
+        List<BuildingType> gebaeudeList;
+        try (Handle handle = jdbi.open()) {
+            gebaeudeList = handle.select(stmt)
+                    .bind("geom", parcelWkbGeometry)
+                    .map((rs, ctx) -> {
+                        LOGGER.debug("bb t_id: " + rs.getString("t_id"));
+
+                        Geometry gebaeudeGeometry = null;
+                        try {
+                            gebaeudeGeometry = decoder.read(rs.getBytes("geometrie"));
+                        }  catch (org.locationtech.jts.io.ParseException e) {
+                            throw new IllegalStateException(e);
+                        }
+                        String bb_egid = rs.getString("gwr_egid");
+                        String status = rs.getString("status");
+                        String art = rs.getString("art");
+
+                        BuildingType gebaeude = new BuildingType();
+                        if (status.equalsIgnoreCase("realisiert")) {
+                            gebaeude.setPlanned(false);
+                        } else {
+                            gebaeude.setPlanned(true);
+                        }
+                        if (art.equalsIgnoreCase("Gebaeude")) {
+                            gebaeude.setUndergroundStructure(false);
+                        } else {
+                            gebaeude.setUndergroundStructure(true);
+                        }
+                        if (bb_egid != null) gebaeude.setEgid(Integer.valueOf(bb_egid));
+                        
+                        Geometry intersection = null;
+                        intersection = parcelGeom.intersection(gebaeudeGeometry);
+                        LOGGER.debug(intersection.toString());
+                        LOGGER.debug("intersection.getArea() {}" + intersection.getArea());
+                        
+                        double intersectionArea = intersection.getArea();
+                        double gebaeudeArea = gebaeudeGeometry.getArea();
+                        LOGGER.debug("intersectionArea {}" + intersectionArea);
+                        LOGGER.debug("gebaeudeArea {}" + gebaeudeArea);
+
+                        // Ignore building if it is less than minIntersection on the parcel.
+                        if (intersection.isEmpty() || intersectionArea < minIntersection) {
+                            return null;
+                        }
+
+                        // Falls der Unterschied zwischen dem Gebäude-Grundstück-Verschnitt und 
+                        // dem gesamten Gebäude kleiner als minIntersection ist, ist das Gebäude
+                        // vollständig auf dem Grundstück.
+                        if (Math.abs(intersectionArea - gebaeudeArea) < minIntersection) {
+                            gebaeude.setArea(gebaeudeArea);
+                        } else {
+                            gebaeude.setAreaShare(intersectionArea);
+                        }
+                        
+                        byte gebaeudeWkbGeometry[] = geomEncoder.write(gebaeudeGeometry);
+
+                        String stmtEntry = "SELECT ge.t_id, lokname.atext AS strassenname, ge.hausnummer, plz.plz, ortname.atext AS ortschaft, ge.astatus, ge.lage, ge.gwr_egid AS geb_egid, ge.gwr_edid \n" +
+                                "FROM \n" +
+                                "    "+getSchema()+"."+TABLE_DM01VCH24LV95DGEBAEUDEADRESSEN_GEBAEUDEEINGANG+" AS ge \n" + 
+                                "    LEFT JOIN "+getSchema()+"."+TABLE_DM01VCH24LV95DGEBAEUDEADRESSEN_LOKALISATIONSNAME+" AS lokname \n" + 
+                                "    ON ge.gebaeudeeingang_von = lokname.benannte \n" + 
+                                "    LEFT JOIN "+getSchema()+"."+TABLE_PLZOCH1LV95DPLZORTSCHAFT_ORTSCHAFT+" AS ort \n" + 
+                                "    ON ST_Intersects(ge.lage, ort.flaeche) \n" + 
+                                "    LEFT JOIN "+getSchema()+"."+TABLE_PLZOCH1LV95DPLZORTSCHAFT_ORTSCHAFTSNAME+" AS ortname \n" + 
+                                "    ON ortname.ortschaftsname_von = ort.t_id \n" +
+                                "    LEFT JOIN "+getSchema()+"."+TABLE_PLZOCH1LV95DPLZORTSCHAFT_PLZ6+" AS plz \n" + 
+                                "    ON ST_Intersects(ge.lage, plz.flaeche ) \n" + 
+                                "WHERE ge.istoffiziellebezeichnung = 'ja' AND ge.astatus = :status AND ge.im_gebaeude = :im_gebaeude AND ST_Intersects(ge.lage, ST_GeomFromWKB(:gebaeudeGeom,2056))";
+
+                        
+                        Map<String, Object> parameters = new HashMap<String, Object>();
+                        parameters.put("gebaeudeGeom", gebaeudeWkbGeometry);
+                        
+                        if (status.equalsIgnoreCase("realisiert")) {
+                            parameters.put("status", "real");
+                        } else {
+                            parameters.put("status", "projektiert");
+                        }
+                        
+                        if (art.equalsIgnoreCase("Gebaeude")) {
+                            parameters.put("im_gebaeude", "BB");
+                        } else {
+                            parameters.put("im_gebaeude", "EO");
+                        }
+                        
+                        List<BuildingEntryType> buildingEntryList = handle.select(stmtEntry)
+                                .bindMap(parameters)
+                                .map((rsEntry, ctxEntry) -> {
+                                    String strassenname = rsEntry.getString("strassenname");
+                                    String hausnummer = rsEntry.getString("hausnummer");
+                                    String plz = rsEntry.getString("plz");
+                                    String ortschaft = rsEntry.getString("ortschaft");
+                                    String geb_egid = rsEntry.getString("geb_egid");
+                                    String gwr_edid = rsEntry.getString("gwr_edid");
+                                    
+                                    // TODO: Soll geprüft werden, ob der Eingang auf dem Grundstück liegt?
+                                    // Kann entweder hier gemacht werden oder bereits in der Query.
+                                    BuildingEntryType gebaeudeeingang = new BuildingEntryType();
+                                    AddressType postalAddress = new AddressType();
+                                    postalAddress.setStreet(strassenname);
+                                    postalAddress.setNumber(hausnummer);
+                                    postalAddress.setPostalCode(Integer.valueOf(plz));
+                                    postalAddress.setCity(ortschaft);
+                                    gebaeudeeingang.setPostalAddress(postalAddress);
+                                    if (geb_egid != null) gebaeudeeingang.setEgid(Integer.valueOf(geb_egid));
+                                    if (gwr_edid != null) gebaeudeeingang.setEdid(Integer.valueOf(gwr_edid));
+                                    
+                                    return gebaeudeeingang;
+                                })
+                                .list();
+                        gebaeude.getBuildingEntries().addAll(buildingEntryList);
+                        return gebaeude;
+                    })
+                    .list();
+        }
+        realEstate.getBuildings().addAll(gebaeudeList);
+    }
+    
+    private void setBodenbedeckung(RealEstateDPR realEstate, Geometry geometry) {
+        WKBWriter geomEncoder = new WKBWriter(2, ByteOrderValues.BIG_ENDIAN);
+        byte wkbGeometry[] = geomEncoder.write(geometry);
+        
+        List<LandCoverShareType> bbList;
+        try (Handle handle = jdbi.open()) { 
+            bbList = handle.select("SELECT ST_Area(ST_Union(geom)) AS flaechenmass, art \n" + 
+                    "FROM (SELECT (ST_Dump(ST_CollectionExtract(ST_Intersection(ST_GeomFromWKB(:geom,2056), b.geometrie), 3))).geom AS geom, b.art FROM "+getSchema()+"."+TABLE_DM01VCH24LV95DBODENBEDECKUNG_BOFLAECHE+" AS b WHERE ST_Intersects(ST_GeomFromWKB(:geom,2056), b.geometrie)) AS foo \n" + 
+                    "WHERE ST_IsValid(geom) IS TRUE AND geom IS NOT NULL GROUP BY art")
+                    .bind("geom", wkbGeometry)
+                    .map((rs, ctx) -> {
+                        double flaechenmass = rs.getDouble("flaechenmass");
+                        String art = rs.getString("art");
+                        LandCoverShareType bb = new LandCoverShareType(); 
+                        bb.setType(LCType.fromValue(art));
+                        bb.setTypeDescription(LCType.fromValue(art).value().substring(LCType.fromValue(art).value().lastIndexOf(".") + 1).trim());
+                        bb.setArea(flaechenmass);
+                        return bb;
+                    })
+                    .list();
+        }
+        realEstate.getLandCoverShares().addAll(bbList);
+    }
+
+    private void setFlurnamen(RealEstateDPR realEstate, Geometry geometry) {
+        WKBWriter geomEncoder = new WKBWriter(2, ByteOrderValues.BIG_ENDIAN);
+        byte wkbGeometry[] = geomEncoder.write(geometry);
+
+        List<LocalNameType> localNameList;
+        try (Handle handle = jdbi.open()) { 
+            localNameList = handle.select("SELECT aname as flurname \n" + 
+                    "FROM (SELECT (ST_Dump(ST_CollectionExtract(ST_Intersection(ST_GeomFromWKB(:geom,2056), f.geometrie), 3))).geom AS geom, f.aname FROM "+getSchema()+"."+TABLE_DM01VCH24LV95NOMENKLATUR_FLURNAME+" AS f WHERE ST_Intersects(ST_GeomFromWKB(:geom,2056), f.geometrie)) AS foo \n" + 
+                    "WHERE ST_IsValid(geom) IS TRUE AND geom IS NOT NULL GROUP BY aname")
+                    .bind("geom", wkbGeometry)
+                    .map((rs, ctx) -> {
+                        String name = rs.getString("flurname");
+                        LocalNameType localName = new LocalNameType(); 
+                        localName.setName(name);
+                        return localName;
+                    })
+                    .list();
+        }
+        realEstate.getLocalNames().addAll(localNameList);
+    }
+
     
     private Grundstueck getParcelByEgrid(String egrid) {
         PrecisionModel precisionModel = new PrecisionModel(1000.0);
@@ -376,8 +690,8 @@ public class MainController {
     // Es gibt keinen Applikationscontext wie bei Spring Boot (resp.
     // Tomcat. Gibt es bessere Lösungen? Nicht getested, ob 
     // bei x-forwarded header etc. dies so auch noch funktioniert.
-    private String getLogoRef(String applicationUrl, String id) {
-        return applicationUrl + "/" + LOGO_ENDPOINT + "/" + id;
+    private String getLogoRef(String applicationContext, String id) {
+        return applicationContext + "/" + LOGO_ENDPOINT + "/" + id;
     }
     
     private String getSchema() {
@@ -443,5 +757,9 @@ public class MainController {
         } else {
             throw new IllegalStateException("unknown gsArt");
         }        
+    }
+    
+    private String getApplicationContext(UriInfo uriInfo) {
+        return uriInfo.getRequestUri().toString().replace(uriInfo.getPath(), "");
     }
 }
