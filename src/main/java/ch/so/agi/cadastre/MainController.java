@@ -214,7 +214,6 @@ public class MainController {
             return Response.noContent().build();
         }
     }
-
     
     @GET
     @Path(value = "extract/{format}/geometry/{egrid}") 
@@ -318,7 +317,6 @@ public class MainController {
         try {
             marshaller.marshal(response, new javax.xml.transform.stream.StreamResult(tmpExtractFile));
 
-            LOGGER.info(tmpExtractFile.getAbsolutePath());
             
         } catch (JAXBException e) {
             throw new IllegalStateException(e.getMessage());
