@@ -1,10 +1,13 @@
 package ch.so.agi.cadastre;
 
+import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
@@ -19,22 +22,15 @@ import java.util.Map;
 import java.util.TimeZone;
 
 import javax.annotation.PostConstruct;
-import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
-import javax.ws.rs.Consumes;
 import javax.ws.rs.GET;
 import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
 import javax.ws.rs.Produces;
 import javax.ws.rs.QueryParam;
-import javax.ws.rs.container.ContainerRequestContext;
 import javax.ws.rs.core.Context;
-import javax.ws.rs.core.HttpHeaders;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
-import javax.ws.rs.core.UriBuilder;
-import javax.ws.rs.core.Request;
-import javax.ws.rs.core.Application;
 import javax.ws.rs.core.UriInfo;
 import javax.xml.bind.JAXBElement;
 import javax.xml.bind.JAXBException;
@@ -43,11 +39,13 @@ import javax.xml.datatype.DatatypeConfigurationException;
 import javax.xml.datatype.DatatypeFactory;
 import javax.xml.datatype.XMLGregorianCalendar;
 import javax.xml.namespace.QName;
-import javax.ws.rs.core.Context;
+import javax.xml.transform.stream.StreamSource;
 
+import org.apache.fop.apps.Fop;
+import org.apache.fop.apps.FopFactory;
+import org.apache.fop.apps.MimeConstants;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
-import org.jboss.resteasy.specimpl.RequestImpl;
 import org.jdbi.v3.core.Handle;
 import org.jdbi.v3.core.Jdbi;
 import org.locationtech.jts.geom.Coordinate;
@@ -58,6 +56,7 @@ import org.locationtech.jts.geom.PrecisionModel;
 import org.locationtech.jts.io.ByteOrderValues;
 import org.locationtech.jts.io.WKBReader;
 import org.locationtech.jts.io.WKBWriter;
+import org.xml.sax.SAXException;
 
 import ch.so.geo.schema.agi.cadastre._0_9.extract.AddressType;
 import ch.so.geo.schema.agi.cadastre._0_9.extract.BuildingType;
@@ -72,7 +71,13 @@ import ch.so.geo.schema.agi.cadastre._0_9.extract.OrganisationType;
 import ch.so.geo.schema.agi.cadastre._0_9.extract.PersonAddressType;
 import ch.so.geo.schema.agi.cadastre._0_9.extract.RealEstateDPR;
 import ch.so.geo.schema.agi.cadastre._0_9.extract.RealEstateType;
-import io.agroal.api.AgroalDataSource;
+import net.sf.saxon.s9api.Processor;
+import net.sf.saxon.s9api.SAXDestination;
+import net.sf.saxon.s9api.SaxonApiException;
+import net.sf.saxon.s9api.XdmNode;
+import net.sf.saxon.s9api.XsltCompiler;
+import net.sf.saxon.s9api.XsltExecutable;
+import net.sf.saxon.s9api.XsltTransformer;
 
 @Path("/")
 public class MainController {
@@ -118,6 +123,7 @@ public class MainController {
     @Inject
     WsConfig wsConfig;
     
+    // Wie funktioniert das hier genau mit CDI?
     private Jdbi jdbi;
     
     @Inject
@@ -300,8 +306,6 @@ public class MainController {
     
     private Response getExtractAsPdf(Grundstueck parcel, GetExtractByIdResponse response) {
     	
-    	// TODO / FIXME
-    	// Falsch. Es muss pro Request ein Verzeichnis erstellen. Fixen auch im Original.
     	try {
     		File tmpFolder = Files.createTempDirectory("cadastrews-").toFile();
 
@@ -317,20 +321,65 @@ public class MainController {
             File xsltFile = new File(Paths.get(tmpFolder.getAbsolutePath(), "xml2pdf.xslt").toFile().getAbsolutePath());
             Files.copy(xsltFileInputStream, xsltFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
 
+            File fopXconfRescoureFile = new File(classLoader.getResource("fop.xconf").getFile());
+            InputStream fopXconfFileInputStream = new FileInputStream(fopXconfRescoureFile);
+            File fopXconfFile = new File(Paths.get(tmpFolder.getAbsolutePath(), "fop.xconf").toFile().getAbsolutePath());
+            Files.copy(fopXconfFileInputStream, fopXconfFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+
+            File cadastraRegularRescoureFile = new File(classLoader.getResource("Cadastra.ttf").getFile());
+            InputStream cadastraRegularFileInputStream = new FileInputStream(cadastraRegularRescoureFile);
+            File cadastraRegularFile = new File(Paths.get(tmpFolder.getAbsolutePath(), "Cadastra.ttf").toFile().getAbsolutePath());
+            Files.copy(cadastraRegularFileInputStream, cadastraRegularFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+
+            File cadastraItalicRescoureFile = new File(classLoader.getResource("CadastraIt.ttf").getFile());
+            InputStream cadastraItalicFileInputStream = new FileInputStream(cadastraItalicRescoureFile);
+            File cadastraItalicFile = new File(Paths.get(tmpFolder.getAbsolutePath(), "CadastraIt.ttf").toFile().getAbsolutePath());
+            Files.copy(cadastraItalicFileInputStream, cadastraItalicFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+
+            File cadastraBoldRescoureFile = new File(classLoader.getResource("CadastraBd.ttf").getFile());
+            InputStream cadastraBoldFileInputStream = new FileInputStream(cadastraBoldRescoureFile);
+            File cadastraBoldFile = new File(Paths.get(tmpFolder.getAbsolutePath(), "CadastraBd.ttf").toFile().getAbsolutePath());
+            Files.copy(cadastraBoldFileInputStream, cadastraBoldFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+
+            File cadastraBoldItalicRescoureFile = new File(classLoader.getResource("CadastraBI.ttf").getFile());
+            InputStream cadastraBoldItalicFileInputStream = new FileInputStream(cadastraBoldItalicRescoureFile);
+            File cadastraBoldItalicFile = new File(Paths.get(tmpFolder.getAbsolutePath(), "CadastraBI.ttf").toFile().getAbsolutePath());
+            Files.copy(cadastraBoldItalicFileInputStream, cadastraBoldItalicFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+
+            File pdfFile = new File(Paths.get(tmpFolder.getAbsolutePath(), parcel.getEgrid() + ".pdf").toFile().getAbsolutePath());
             
-            
-            
-            
+            Processor proc = new Processor(false);
+            XsltCompiler comp = proc.newXsltCompiler();
+            XsltExecutable exp = comp.compile(new StreamSource(xsltFile));
+            XdmNode source = proc.newDocumentBuilder().build(new StreamSource(tmpExtractFile));
+            XsltTransformer trans = exp.load();
+            trans.setInitialContextNode(source);
+
+            FopFactory fopFactory = FopFactory.newInstance(fopXconfFile);
+            OutputStream outPdf = new BufferedOutputStream(new FileOutputStream(pdfFile)); 
+            Fop fop = fopFactory.newFop(MimeConstants.MIME_PDF, outPdf);
+
+            trans.setDestination(new SAXDestination(fop.getDefaultHandler()));
+            trans.transform();
+            outPdf.close();
+            trans.close();
+
+            return Response.ok((Object)pdfFile)
+                    .header("content-disposition", "attachment; filename=" + pdfFile.getName())
+                    .header("content-length", pdfFile.length())
+                    .build();
         } catch (JAXBException e) {
             throw new IllegalStateException(e.getMessage());
         } catch (FileNotFoundException e) {
             throw new IllegalStateException(e.getMessage());
 		} catch (IOException e) {
             throw new IllegalStateException(e.getMessage());
-		}
-
-        
-        return null;
+		} catch (SaxonApiException e) {
+            throw new IllegalStateException(e.getMessage());
+        } catch (SAXException e) {
+            e.printStackTrace();
+        }
+        return Response.noContent().build();
     }
     
     private void setVermessungsaufsichtAddress(RealEstateDPR realEstate) {       

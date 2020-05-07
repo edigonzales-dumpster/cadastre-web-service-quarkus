@@ -239,7 +239,7 @@
                 <fo:block text-align="right">Fläche</fo:block>
               </fo:table-cell>
               <fo:table-cell padding-top="2mm">
-                <fo:block></fo:block>
+                <fo:block/>
               </fo:table-cell>
               <fo:table-cell text-align="left" padding-top="2mm">
                 <fo:block>
@@ -270,15 +270,12 @@
                 </fo:table-cell>
                 <fo:table-cell padding-top="1mm" border-width="0pt" border-style="solid">
                   <fo:block text-align="right" margin-right="1mm">
-                            <xsl:value-of select="format-number(extract:Area, &quot;#'###&quot;, &quot;swiss&quot;)"/>
+                    <xsl:value-of select="format-number(extract:Area, &quot;#'###&quot;, &quot;swiss&quot;)"/>
                   </fo:block>
                 </fo:table-cell>
-
-                        <fo:table-cell padding-top="1mm">
-                          <fo:block  margin-left="0mm" line-height-shift-adjustment="disregard-shifts">m<fo:inline baseline-shift="super" font-size="60%">2</fo:inline></fo:block>
-                        </fo:table-cell>
-
-
+                <fo:table-cell padding-top="1mm">
+                  <fo:block margin-left="0mm" line-height-shift-adjustment="disregard-shifts">m<fo:inline baseline-shift="super" font-size="60%">2</fo:inline></fo:block>
+                </fo:table-cell>
                 <fo:table-cell padding-top="1mm" border-width="0pt" border-style="solid">
                   <fo:block>
                     <xsl:choose>
@@ -304,15 +301,19 @@
                   </fo:block>
                 </fo:table-cell>
                 <fo:table-cell padding-top="1mm" border-width="0pt" border-style="solid">
-            <xsl:for-each select="extract:BuildingEntry">
-            <fo:block>
-<xsl:value-of select="extract:PostalAddress/extract:Street"/><xsl:text> </xsl:text><xsl:value-of select="extract:PostalAddress/extract:Number"/><xsl:text>, </xsl:text>
-<xsl:value-of select="extract:PostalAddress/extract:PostalCode"/><xsl:text> </xsl:text><xsl:value-of select="extract:PostalAddress/extract:City"/>
-            </fo:block>
-
-
-            </xsl:for-each>
-
+                  <!-- Es wird immer mindestens ein leerer Block geschrieben. Oder choose/when/otherwise. -->
+                  <fo:block/>
+                  <xsl:for-each select="extract:BuildingEntry">
+                    <fo:block>
+                      <xsl:value-of select="extract:PostalAddress/extract:Street"/>
+                      <xsl:text> </xsl:text>
+                      <xsl:value-of select="extract:PostalAddress/extract:Number"/>
+                      <xsl:text>, </xsl:text>
+                      <xsl:value-of select="extract:PostalAddress/extract:PostalCode"/>
+                      <xsl:text> </xsl:text>
+                      <xsl:value-of select="extract:PostalAddress/extract:City"/>
+                    </fo:block>
+                  </xsl:for-each>
                 </fo:table-cell>
               </fo:table-row>
             </xsl:for-each>
@@ -388,7 +389,6 @@
           </fo:table-body>
         </fo:table>
       </fo:block-container>
-
       <fo:block-container wrap-option="wrap" hyphenate="false" hyphenation-character="-" font-weight="400" font-size="8.5pt">
         <fo:table table-layout="fixed" width="100%" margin-top="8mm">
           <fo:table-column column-width="94mm"/>
@@ -403,16 +403,17 @@
               </fo:table-cell>
             </fo:table-row>
             <fo:table-row>
-            <!--preserve anders lösen? Mit blocks?-->
+              <!--preserve anders lösen? Mit blocks?-->
               <fo:table-cell font-weight="400" padding-top="2mm">
                 <fo:block linefeed-treatment="preserve">
                   <xsl:value-of select="extract:LandRegisterOffice/extract:Name"/>
                   <xsl:text>
                   </xsl:text>
-                  <xsl:if test="extract:LandRegisterOffice/extract:Line1"><xsl:value-of select="extract:LandRegisterOffice/extract:Line1"/>
-                  <xsl:text> 
+                  <xsl:if test="extract:LandRegisterOffice/extract:Line1">
+                    <xsl:value-of select="extract:LandRegisterOffice/extract:Line1"/>
+                    <xsl:text> 
                   </xsl:text>
-                </xsl:if>                  
+                  </xsl:if>
                   <xsl:value-of select="extract:LandRegisterOffice/extract:Address/extract:Street"/>
                   <xsl:text> </xsl:text>
                   <xsl:value-of select="extract:LandRegisterOffice/extract:Address/extract:Number"/>
@@ -435,14 +436,15 @@
                   </fo:basic-link>
                   <xsl:text> 
                   </xsl:text>
-                  <fo:basic-link text-decoration="none" color="rgb(76,143,186)">
-                    <xsl:attribute name="external-destination"><xsl:value-of select="extract:LandRegisterOffice/extract:Web"/></xsl:attribute>so.ch
+                  <fo:basic-link text-decoration="none" color="rgb(76,143,186)"><xsl:attribute name="external-destination"><xsl:value-of select="extract:LandRegisterOffice/extract:Web"/></xsl:attribute>so.ch
                   </fo:basic-link>
                 </fo:block>
               </fo:table-cell>
               <fo:table-cell font-weight="400" padding-top="2mm">
                 <fo:block linefeed-treatment="preserve">
-                  <xsl:value-of select="extract:SurveyorOffice/extract:Person/extract:FirstName"/><xsl:text> </xsl:text><xsl:value-of select="extract:SurveyorOffice/extract:Person/extract:LastName"/>
+                  <xsl:value-of select="extract:SurveyorOffice/extract:Person/extract:FirstName"/>
+                  <xsl:text> </xsl:text>
+                  <xsl:value-of select="extract:SurveyorOffice/extract:Person/extract:LastName"/>
                   <xsl:text> 
                   </xsl:text>
                   <xsl:value-of select="extract:SurveyorOffice/extract:Name"/>
@@ -486,7 +488,6 @@
           </fo:table-body>
         </fo:table>
       </fo:block-container>
-
     </fo:flow>
   </xsl:template>
 </xsl:stylesheet>
