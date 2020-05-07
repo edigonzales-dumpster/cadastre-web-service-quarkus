@@ -2,8 +2,12 @@ package ch.so.agi.cadastre;
 
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.Base64;
@@ -110,10 +114,7 @@ public class MainController {
     
     @ConfigProperty(name = "cadastre.minIntersection", defaultValue="1.0") 
     double minIntersection;
-    
-    @ConfigProperty(name = "cadastre.tmpdir", defaultValue="/tmp") 
-    String cadastreTmpdir;
-    
+        
     @Inject
     WsConfig wsConfig;
     
@@ -133,17 +134,7 @@ public class MainController {
     public String ping() {
         return "cadastre-web-service";
     }
-    
-    @GET
-    @Path("fubar")
-    @Produces(MediaType.TEXT_PLAIN)
-    public Map<String, String> fubar(@Context HttpHeaders headers) {
-        Map<String, String> resultMap = new HashMap<>();
-        headers.getRequestHeaders().forEach(
-                (key, values) -> resultMap.put(key, String.join(",", values)));
-        return resultMap;
-    }
-    
+        
     @GET
     @Path(value = "getegrid/{format}")
     @Produces({MediaType.APPLICATION_XML})
@@ -254,6 +245,7 @@ public class MainController {
                 InputStream inputStream = new FileInputStream(file);
                 byte[] bdata = inputStream.readAllBytes();
                 extract.setLogoGrundstuecksinformation(bdata);
+                inputStream.close();
             } catch (IOException e) {
                 throw new IllegalStateException(e);
             }
@@ -307,20 +299,35 @@ public class MainController {
     }
     
     private Response getExtractAsPdf(Grundstueck parcel, GetExtractByIdResponse response) {
-        File tmpFolder = new File(cadastreTmpdir,"cadastrews"+Thread.currentThread().getId());
-        if(!tmpFolder.exists()) {
-            tmpFolder.mkdirs();
-        }
-        LOGGER.info("tmpFolder {}" + tmpFolder.getAbsolutePath());
+    	
+    	// TODO / FIXME
+    	// Falsch. Es muss pro Request ein Verzeichnis erstellen. Fixen auch im Original.
+    	try {
+    		File tmpFolder = Files.createTempDirectory("cadastrews-").toFile();
 
-        File tmpExtractFile = new java.io.File(tmpFolder,parcel.getEgrid()+".xml");
-        try {
+	        LOGGER.info("tmpFolder " + tmpFolder.getAbsolutePath());
+	
+	        File tmpExtractFile = new java.io.File(tmpFolder,parcel.getEgrid()+".xml");
+        
             marshaller.marshal(response, new javax.xml.transform.stream.StreamResult(tmpExtractFile));
 
+            ClassLoader classLoader = getClass().getClassLoader();
+            File xsltRescoureFile = new File(classLoader.getResource("xml2pdf.xslt").getFile());
+            InputStream xsltFileInputStream = new FileInputStream(xsltRescoureFile);
+            File xsltFile = new File(Paths.get(tmpFolder.getAbsolutePath(), "xml2pdf.xslt").toFile().getAbsolutePath());
+            Files.copy(xsltFileInputStream, xsltFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+
+            
+            
+            
             
         } catch (JAXBException e) {
             throw new IllegalStateException(e.getMessage());
-        }
+        } catch (FileNotFoundException e) {
+            throw new IllegalStateException(e.getMessage());
+		} catch (IOException e) {
+            throw new IllegalStateException(e.getMessage());
+		}
 
         
         return null;
@@ -687,7 +694,7 @@ public class MainController {
     // TODO 
     // Es gibt keinen Applikationscontext wie bei Spring Boot (resp.
     // Tomcat. Gibt es bessere Lösungen? Nicht getested, ob 
-    // bei x-forwarded header etc. dies so auch noch funktioniert.
+    // bei x-forwarded header etc. dies so auch wirklich funktioniert.
     private String getLogoRef(String applicationContext, String id) {
         return applicationContext + "/" + LOGO_ENDPOINT + "/" + id;
     }

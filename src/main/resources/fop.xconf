@@ -1,0 +1,23 @@
+<!-- NOTE: This is the version of the configuration -->
+<fop version="1.0">
+  <!-- Base URL for resolving relative URLs -->
+  <base>.</base>
+  <accessibility>true</accessibility>
+  <renderers>
+    <renderer mime="application/pdf">
+      <pdf-a-mode>PDF/A-1a</pdf-a-mode>
+      <version>1.4</version>
+      <fonts>
+        <font kerning="yes" embed-url="Cadastra.ttf" encoding-mode="single-byte">
+          <font-triplet name="Cadastra" style="normal" weight="400"/>
+        </font>
+        <font kerning="yes" embed-url="CadastraBd.ttf" encoding-mode="single-byte">
+          <font-triplet name="Cadastra" style="normal" weight="700"/>
+        </font>
+        <font kerning="yes" embed-url="CadastraIt.ttf" encoding-mode="single-byte">
+          <font-triplet name="Cadastra" style="italic" weight="400"/>
+        </font>
+      </fonts>
+    </renderer>
+  </renderers>  
+</fop>
