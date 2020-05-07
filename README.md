@@ -15,6 +15,10 @@ Be aware that it’s not an _über-jar_ as the dependencies are copied into the 
 
 The application is now runnable using `java -jar target/cadastre-web-service-0.0.1-SNAPSHOT-runner.jar`.
 
+```
+./mvnw clean package -Dquarkus.container-image.build=true
+```
+
 ## Creating a native executable
 
 You can create a native executable using: `./mvnw package -Pnative`.
